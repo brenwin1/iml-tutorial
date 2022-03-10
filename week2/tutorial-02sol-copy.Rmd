@@ -1,0 +1,1211 @@
+---
+title: "ETC3250/5250 Tutorial 2 Solution"
+subtitle: "Fitting nonlinear regression models"
+author: "prepared by Professor Di Cook"
+date: "Week 2"
+output:
+  html_document:
+    after_body: tutorial-footer.html
+    css: tutorial.css
+---
+
+```{r, echo = FALSE, message = FALSE, warning = FALSE}
+knitr::opts_chunk$set(
+  message = FALSE,
+  warning = FALSE,
+  error = FALSE, 
+  collapse = TRUE,
+  comment = "#",
+  fig.height = 4,
+  fig.width = 8,
+  fig.align = "center",
+  cache = FALSE
+)
+
+library(emo)
+```
+
+
+```{r, echo = FALSE, message = FALSE, warning = FALSE, warning = FALSE}
+knitr::opts_chunk$set(
+  message = FALSE,
+  warning = FALSE,
+  error = FALSE, 
+  collapse = TRUE,
+  comment = "#",
+  fig.height = 4,
+  fig.width = 8,
+  fig.align = "center",
+  cache = FALSE
+)
+```
+
+## `r emo::ji("gear")` Exercise 
+
+      load libraries
+```{r load_libraries, echo=FALSE}
+# --- load libraries
+library(tidyverse); ggplot2::theme_set(theme_bw())
+library(ISLR)
+library(tidymodels)
+library(GGally)
+library(mgcv)
+library(gratia)
+library(patchwork)
+```
+
+
+### 1. Fitting NRC rankings
+
+In 2010, the National Research Council released rankings for all doctorate programs in the USA (https://en.wikipedia.org/wiki/United_States_National_Research_Council_rankings). The data was initially released and then only available for a fee. I managed to get a copy during the free period, and this is the data that we will use for this exercise. There hasn't been another set of rankings publicly released since then, and I don't know why. Only the rankings and statistics for Statistics programs are included in this data set.
+
+Your job is to answer the question: "How is R Ranking related to rankings on research, student support and diversity?" using the 5th percentile for each of these quantities. Fit your best model, try using splines, and justify your choices.
+
+#### a. 
+
+Read the data. Rename the columns containing the variables of interest to `rank`, `research`, `student` and `diversity`). Using recipes, split the data into 2/3 training and 1/3 test sets.
+
+      read in data      
+```{r}
+# --- read in data
+nrc <- read_csv(here::here("data/nrc.csv")) %>%
+  # create new variables
+  dplyr::mutate(rank = R.Rankings.5th.Percentile,
+                research = Research.Activity.5th.Percentile,
+                student = Student.Support.Outcomes.5th.Percentile,
+                diversity = Diversity.5th.Percentile) %>%
+  # select only relevant variables created
+  select(rank, research, student, diversity) 
+```
+
+
+      data splitting *`rsample`
+```{r}
+# --- split data into training and test
+set.seed(22) # set seed; for reproducibility
+
+# split data into training & test set
+train_test_split <- rsample::initial_split(data = nrc, 
+                                           prop = 2/3) # proportion: 2/3 training// 1/3 test
+
+nrc_train <- rsample::training(train_test_split) # extract training set
+nrc_test <- rsample::testing(train_test_split) # extract test set
+```
+
+
+#### b. 
+
+Make response vs predictor plots and predictor vs predictor plots of the training data. Explain the relationships, outliers, and how this would affect the modeling, and what you would expect the results of the modeling to be. 
+
+      response vs. predictor plot
+```{r fig.width=10}
+# --- plot response vs. predictors; with loess smooth overlayed
+GGally::ggduo(data = nrc_train, 
+              columnsX = c(2,3,4), # predictor variables; on x-axis
+              columnsY = 1) # response variable; on y-axis
+```
+
+**Rank has a strong relationship with research but very weak with the other two. There is one outlier with good rank but not so good research rank.**
+
+#### c. 
+
+Make a scatterplot matrix of the predictors, and discuss any potential problems like multicollinearity. 
+
+
+      predictor vs. predictor plots (scatterplot matrix)
+```{r fig.width=6, fig.height=6, out.width="60%"}
+# --- generalised pairs plot (with all numeric variables; scatterplot matrix)
+GGally::ggpairs(data = nrc_train,
+                columns = c(2,3,4)) # predictors
+
+# OR
+
+GGally::ggscatmat(data = nrc_train,
+                  columns = c(2, 3, 4)) # predictors
+```
+
+**There is no relationship between any pairs of predictors, and no obvious outliers or clusters. The only small problem is that the distribution of each predictor is slightly right-skewed.**
+
+#### d. 
+
+Fit a linear model. Report estimates, model fit statistics, and the test MSE. Make the plots to visually assess the fit, including observed vs fitted, residual vs fitted, histogram of resisuals, normal probability plot of residuals, and the fitted vs each predictor.
+
+      fit linear model
+```{r fig.width=6, fig.height=6}
+# === fit linear model; to training data
+
+# --- model specification *`parsnip`
+lm_mod <- parsnip::linear_reg() %>% # (I) model specification
+  parsnip::set_engine("lm") %>% # (II) set engine
+  parsnip::set_mode("regression") # (III) set mode; to be explicit (not necessary here)
+
+# --- fit model *output: `parsnip` model object
+nrc_lm_fit <- lm_mod %>% 
+  parsnip::fit(rank ~ ., # rank ~ diversity + student + research
+               data = nrc_train)
+```
+
+
+      report estimates + model fit statistics + test set metrics
+```{r}
+# --- `broom` functions
+broom::tidy(nrc_lm_fit) # extract model coefs.; in tidy `tibble`
+broom::glance(nrc_lm_fit) # extract model fit summary statistics 
+
+# `broom::augment` df; with predicted values & residuals
+
+# training set
+nrc_lm_train_pred <- broom::augment(x = nrc_lm_fit, 
+                                    new_data = nrc_train)
+
+# test set
+nrc_lm_test_pred <- broom::augment(nrc_lm_fit, 
+                                   new_data = nrc_test)
+
+# --- general function; get common performance metrics *return 3 column tibble
+
+# test set
+yardstick::metrics(data = nrc_lm_test_pred, 
+                   # supply actual & predicted values
+                   truth = rank, # actual
+                   estimate = .pred) # predicted
+
+# training set
+# yardstick::metrics(data = nrc_lm_train_pred, 
+#                    truth = rank, 
+#                    estimate = .pred)
+```
+
+
+      diagnostics plot
+•usually; we run model diagnostics on training data
+-> check if model assumptions are met
+=> quite unusual; run diagnostics on test set
+
+•e.g. linear model assumptions
+-> $\epsilon \sim NIID(0, \sigma^2)$
+-> response has a linear r/s with predictors
+
+```{r}
+# === diagnostic plots
+
+#  -------------------- training set --------------------
+
+# --- plot observed vs. predicted values
+# -> hope; close to ideal of diagonally regressed line 
+p_f <- nrc_lm_train_pred %>% 
+  ggplot() +
+  geom_point(aes(x = .pred, 
+                 y = rank)) +
+  # add 45° line; for visual aid
+  geom_abline(slope = 1,
+              intercept = 0,
+              colour = "red") +
+  ggtitle("Observed vs. fitted values")
+
+# --- plot residuals vs. predicted values
+# -> want; homoskedasticity
+p_e <- nrc_lm_train_pred %>% 
+  ggplot() +
+  geom_point(aes(x = .pred,
+                 y = .resid)) + 
+  geom_hline(yintercept = 0,
+             colour = "red") +
+  ggtitle("Residual vs. predicted values")
+
+# --- plot histogram of residuals
+# -> check for normality 
+p_h <- nrc_lm_train_pred %>% 
+  ggplot(aes(x = .resid)) +
+  # plot histogram of residuals
+  geom_histogram(binwidth = 2.5, 
+                 colour = "white") +
+  # include density
+  geom_density(aes(y = ..count..), # = stat(count) *`..<>..`: special variables; perform stat transformation = stat(count)
+               bw = 2, # smoothing bandwidth
+               colour = "orange") +
+  ggtitle("Histogram of residuals")
+
+# --- `QQplot`: check for normality; compare theoretical (normal) quantiles with sample quantiles
+p_q <- nrc_lm_train_pred %>% 
+  ggplot(aes(sample = .resid)) +
+  stat_qq() +
+  stat_qq_line(colour = "red") + # add 45° qq line
+  xlab("theoretical") +
+  ylab("sample") +
+  ggtitle("QQ plot of residuals")
+
+require(patchwork)
+p_f + p_e + p_h + p_q +
+  plot_annotation(tag_levels = "A")
+
+#  -------------------- test set --------------------
+
+# # --- plot observed vs. predicted values
+# # -> hope; close to ideal of diagonally regressed line 
+# p_f <- nrc_lm_train_pred %>% 
+#   ggplot() +
+#   geom_point(aes(x = .pred, 
+#                  y = rank)) +
+#   # add 45° line; for visual aid
+#   geom_abline(slope = 1,
+#               intercept = 0,
+#               colour = "red") +
+#   ggtitle("Observed vs. fitted values")
+# 
+# # --- plot residuals vs. predicted values
+# # -> want; homoskedasticity
+# p_e <- nrc_lm_test_pred %>% 
+#   ggplot() +
+#   geom_point(aes(x = .pred,
+#                  y = .resid)) + 
+#   geom_hline(yintercept = 0,
+#              colour = "red") +
+#   ggtitle("Residual vs. predicted values")
+# 
+# # --- plot histogram of residuals
+# # -> check for normality 
+# p_h <- nrc_lm_test_pred %>% 
+#   ggplot(aes(x = .resid)) +
+#   # plot histogram of residuals
+#   geom_histogram(binwidth = 2.5, 
+#                  colour = "white") +
+#   # include density
+#   geom_density(aes(y = ..count..), # = stat(count) *`..<>..`: special variables; perform stat transformation = stat(count)
+#                bw = 2, # smoothing bandwidth
+#                colour = "orange") +
+#   ggtitle("Histogram of residuals")
+# 
+# # --- `QQplot`: check for normality; compare theoretical (normal) quantiles with sample quantiles
+# p_q <- nrc_lm_test_pred %>% 
+#   ggplot(aes(sample = .resid)) +
+#   stat_qq() +
+#   stat_qq_line(colour = "red") + # add 45° reference line
+#   xlab("theoretical") +
+#   ylab("sample") +
+#   ggtitle("QQ plot of residuals")
+# 
+# require(patchwork)
+# p_f + p_e + p_h + p_q +
+#   plot_annotation(tag_levels = "A")
+```
+
+- $\epsilon \sim NIID(0, \sigma^2)$
+
+      plot observed & fitted values; against each predictor
+```{r fig.width=12}
+# --- plot observed & fitted values; against each predictor
+
+# -------------------- training set --------------------
+# research
+p1 <- nrc_lm_train_pred %>% 
+  ggplot() +
+  # observed
+  geom_point(aes(x = research, 
+                 y = rank)) +
+  # fitted
+  geom_point(aes(x = research, 
+                 y = .pred),
+             colour = "blue")
+
+# student
+p2 <- ggplot(nrc_lm_train_pred) +
+  # observed
+  geom_point(aes(x = student,
+                 y = rank)) +
+  # fitted
+  geom_point(aes(x = student, 
+                 y = .pred),
+             colour ="blue")
+
+# diversity
+p3 <- nrc_lm_train_pred %>% 
+  ggplot() +
+  geom_point(aes(x = diversity, 
+                 y = rank)) +
+  geom_point(aes(x = diversity, 
+                 y = .pred),
+             colour ="blue")
+
+require(patchwork)
+p1 + p2 + p3
+
+# -------------------- test set --------------------
+# research
+p1 <- nrc_lm_test_pred %>% 
+  ggplot() +
+  # observed
+  geom_point(aes(x = research, 
+                 y = rank)) +
+  # fitted
+  geom_point(aes(x = research, 
+                 y = .pred),
+             colour = "blue")
+
+# student
+p2 <- nrc_lm_test_pred %>% 
+  ggplot() +
+  # observed
+  geom_point(aes(x = student,
+                 y = rank)) +
+  # fitted
+  geom_point(aes(x = student, 
+                 y = .pred),
+             colour ="blue")
+
+# diversity
+p3 <- nrc_lm_test_pred %>% 
+  ggplot() +
+  geom_point(aes(x = diversity, 
+                 y = rank)) +
+  geom_point(aes(x = diversity, 
+                 y = .pred),
+             colour ="blue")
+
+require(patchwork)
+p1 + p2 + p3
+```
+
+**Training $R^2$ is** `r round(glance(nrc_lm_fit)$r.squared, 3)` **. The model explains about 60% of the variation in rank. Only research is statistically significant for the model. Test RMSE is** `r round(metrics(nrc_lm_test_pred, truth = rank, estimate = .pred)[1,3], 1)`
+
+**The model fit is reasonably weak. There is some moderate heteroskedasticity, with smaller spread at low ranks. There are long tails, that is, outliers at both small and large values.**
+
+**The plots against individual predictors shows that research is the only variable strongly contributing to the fit, which is supported by the significance tests associated with each parameter estimate.**
+
+#### e. 
+
+Fit a splines model. Report estimates, model fit statistics, and the test RMSE. Make the plots to visually assess the fit, including observed vs fitted, residual vs fitted, histogram of resisuals, normal probability plot of residuals, and the fitted vs each predictor.
+
+      fit a spline model
+```{r fig.width=6, fig.height=6}
+# --- `recipe`
+nrc_ns_rec <- recipes::recipe(rank ~ research + student + diversity, 
+                              data = nrc_train) %>% # create/initialise recipe
+  recipes::step_ns(research, student, diversity, # specify variables to transform
+                   deg_free = 3) # degree of freedom or polynomial degree *directly related to no. of knots; knots = df - 1; for natural spline
+
+# --- `workflow`: encapsulate major pieces; in model workflow
+nrc_ns_wf <- workflows::workflow() %>% # create/initialise workflow
+  workflows::add_model(lm_mod) %>% # add model 
+  workflows::add_recipe(nrc_ns_rec) # add preprocessing step
+
+# fit workflow object
+# -> fit a linear model to the transformed data
+nrc_ns_fit <- parsnip::fit(object = nrc_ns_wf, # `workflow` object
+                           data = nrc_train) # training data
+```
+
+$y = \beta_0 + \beta_1.x_1 + \beta_2.x_2 ... + \epsilon$
+$y = \beta_0 + \beta_1.b_1.x_1 + \beta_2.b_2.x_2 +... + \epsilon$
+
+      optional: see what basis function looks like: plot basis function against original x-values
+•e.g. to interpret: -ve coefficient; imply; shape of natural spline basis curve was flipped over the range to which it applied
+```{r}
+# === optional plot transformed `x` values against original `x`
+
+# --- apply `recipe` 
+nrc_train_baked <- nrc_ns_rec %>% 
+  recipes::prep() %>% # estimate required params. from a training set; later applied to other data sets *train `recipe`
+  recipes::bake(new_data = nrc_train) # apply a trained preprocessing recipe
+
+# ---- bind original data with transformed data
+nrc_train_all <- nrc_train %>% 
+  select(research, student, diversity) %>% 
+  # transformed data
+  bind_cols(nrc_train_baked)
+
+# --- plot `research`
+p1 <- nrc_train_all %>% 
+  ggplot() +
+  geom_point(aes(x = research,
+                 y = research_ns_1))
+
+p2 <- nrc_train_all %>% 
+  ggplot() +
+  geom_point(aes(x = research,
+                 y = research_ns_2))
+
+p3 <- nrc_train_all %>% 
+  ggplot() +
+  geom_point(aes(x = research,
+                 y = research_ns_3))
+
+require(patchwork)
+p1 + p2 + p3 +
+  patchwork::plot_layout(ncol = 1)
+
+# OR
+# GGally::ggduo(data = nrc_train_all,
+#               columnsX = 1, # `research`
+#               columnsY = 5:7, # `research_ns_1`// `research_ns_2`// `research_ns_3`
+#               type = list(continuous = "points")) # points
+
+# --- plot `student`
+p1 <- nrc_train_all %>% 
+  ggplot() +
+  geom_point(aes(x = student,
+                 y = student_ns_1))
+
+p2 <- nrc_train_all %>% 
+  ggplot() +
+  geom_point(aes(x = student,
+                 y = student_ns_2))
+
+p3 <- nrc_train_all %>% 
+  ggplot() +
+  geom_point(aes(x = student,
+                 y = student_ns_3))
+
+require(patchwork)
+p1 + p2 + p3 +
+  patchwork::plot_layout(ncol = 1)
+
+# OR
+# GGally::ggduo(data = nrc_train_all,
+#               columnsX = 2, # `student`
+#               columnsY = 8:10, # `student_ns_1`// `student_ns_2`// `student_ns_3`
+#               type = list(continuous = "points")) # points
+
+# --- plot `diversity`
+p1 <- nrc_train_all %>% 
+  ggplot() +
+  geom_point(aes(x = diversity,
+                 y = diversity_ns_1))
+
+p2 <- nrc_train_all %>% 
+  ggplot() +
+  geom_point(aes(x = diversity,
+                 y = diversity_ns_2))
+
+p3 <- nrc_train_all %>% 
+  ggplot() +
+  geom_point(aes(x = diversity,
+                 y = diversity_ns_3))
+
+require(patchwork)
+p1 + p2 + p3 +
+  patchwork::plot_layout(ncol = 1)
+
+# OR
+# GGally::ggduo(data = nrc_train_all,
+#               columnsX = 3, # `diversity`
+#               columnsY = 11:13, # `diversity_ns_1`// `diversity_ns_2`// `diversity_ns_3`
+#               type = list(continuous = "points")) # points
+```
+
+      report estimates + model fit statistics + test set metrics
+```{r}
+# === `broom`
+broom::tidy(nrc_ns_fit) # extract model coefs; in tidy `tibble`
+
+# -> model coefs. NOT useful; plot response against natural spline instead
+nrc_train %>% 
+  ggplot(aes(y = rank,
+             x = research)) +
+  # overlay data points
+  geom_point() +
+  # overly spline
+  geom_smooth(method = "lm",
+              formula = y ~ splines::ns(x,
+                                        df = 3))
+
+broom::glance(nrc_ns_fit) # extract model fit summary stats.
+
+
+# `broom::augment` df; with predicted values & residuals
+
+# training set
+nrc_ns_train_pred <- broom::augment(x = nrc_ns_fit, 
+                                    new_data = nrc_train) %>% 
+  # include residual values = observed - .pred
+  mutate(.resid = rank - .pred)
+
+# test set
+nrc_ns_test_pred <- broom::augment(x = nrc_ns_fit, 
+                                   new_data = nrc_test) %>%
+  # include residual values
+  mutate(.resid = rank - .pred)
+
+# test set
+yardstick::metrics(data = nrc_ns_test_pred, 
+                   # supply actual & predicted values
+                   truth = rank, 
+                   estimate = .pred)
+
+# training set
+yardstick::metrics(data = nrc_ns_train_pred,
+                   # supply actual & predicted values
+                   truth = rank,
+                   estimate = .pred)
+```
+
+    diagnostics plot
+•usually; we run model diagnostics on training data
+-> check if model assumptions are met
+
+```{r}
+# === diagnostic plots
+# •usually; run model diagnostics; on training data
+# -> where we 
+
+#  -------------------- training set --------------------
+
+# --- plot observed vs. predicted values
+# -> hope; close to ideal of diagonally regressed line 
+p_f <- nrc_ns_train_pred %>% 
+  ggplot() +
+  geom_point(aes(x = .pred, 
+                 y = rank)) +
+  # add 45° line; for visual aid
+  geom_abline(slope = 1,
+              intercept = 0,
+              colour = "red") +
+  ggtitle("Observed vs. fitted values")
+
+# --- plot residuals vs. predicted values
+# -> want; homoskedasticity
+p_e <- nrc_ns_train_pred %>% 
+  ggplot() +
+  geom_point(aes(x = .pred,
+                 y = .resid)) + 
+  geom_hline(yintercept = 0,
+             colour = "red") +
+  ggtitle("Residual vs. predicted values")
+
+# --- plot histogram of residuals
+# -> check for normality 
+p_h <- nrc_ns_train_pred %>% 
+  ggplot(aes(x = .resid)) +
+  # plot histogram of residuals
+  geom_histogram(binwidth = 2.5, 
+                 colour = "white") +
+  # include density
+  geom_density(aes(y = ..count..), # = stat(count) *`..<>..`: special variables; perform stat transformation = stat(count)
+               bw = 2, # smoothing bandwidth
+               colour = "orange") +
+  ggtitle("Histogram of residuals")
+
+# --- `QQplot`: check for normality; compare theoretical (normal) quantiles with sample quantiles
+p_q <- nrc_ns_train_pred %>% 
+  ggplot(aes(sample = .resid)) +
+  stat_qq() +
+  stat_qq_line(colour = "red") + # add 45° qq line
+  xlab("theoretical") +
+  ylab("sample") +
+  ggtitle("QQ plot of residuals")
+
+require(patchwork)
+p_f + p_e + p_h + p_q +
+  plot_annotation(tag_levels = "A")
+
+#  -------------------- test set --------------------
+
+# # --- plot observed vs. predicted values
+# # -> hope; close to ideal of diagonally regressed line 
+# p_f <- nrc_ns_test_pred %>% 
+#   ggplot() +
+#   geom_point(aes(x = .pred, 
+#                  y = rank)) +
+#   # add 45° line; for visual aid
+#   geom_abline(slope = 1,
+#               intercept = 0,
+#               colour = "red") +
+#   ggtitle("Observed vs. fitted values")
+# 
+# # --- plot residuals vs. predicted values
+# # -> want; homoskedasticity
+# p_e <- nrc_ns_test_pred %>% 
+#   ggplot() +
+#   geom_point(aes(x = .pred,
+#                  y = .resid)) + 
+#   geom_hline(yintercept = 0,
+#              colour = "red") +
+#   ggtitle("Residual vs. predicted values")
+# 
+# # --- plot histogram of residuals
+# # -> check for normality 
+# p_h <- nrc_ns_test_pred %>% 
+#   ggplot(aes(x = .resid)) +
+#   # plot histogram of residuals
+#   geom_histogram(binwidth = 2.5, 
+#                  colour = "white") +
+#   # include density
+#   geom_density(aes(y = ..count..), # = stat(count) *`..<>..`: special variables; perform stat transformation = stat(count)
+#                bw = 2, # smoothing bandwidth
+#                colour = "orange") +
+#   ggtitle("Histogram of residuals")
+# 
+# # --- `QQplot`: check for normality; compare theoretical (normal) quantiles with sample quantiles
+# p_q <- nrc_ns_test_pred %>% 
+#   ggplot(aes(sample = .resid)) +
+#   stat_qq() +
+#   stat_qq_line(colour = "red") + # add 45° qq line
+#   xlab("theoretical") +
+#   ylab("sample") +
+#   ggtitle("QQ plot of residuals")
+# 
+# require(patchwork)
+# p_f + p_e + p_h + p_q +
+#   plot_annotation(tag_levels = "A")
+```
+      
+      plot observed response &  fitted values; against each predictor
+•for both training & test set
+```{r fig.width=12}
+# --- plot observed & fitted values; against each predictor
+
+# -------------------- training set --------------------
+# research
+p1 <- nrc_ns_train_pred %>% 
+  ggplot() +
+  # observed
+  geom_point(aes(x = research, 
+                 y = rank)) +
+  # fitted
+  geom_point(aes(x = research, 
+                 y = .pred),
+             colour = "blue")
+
+# student
+p2 <- nrc_ns_train_pred %>% 
+  ggplot() +
+  # observed
+  geom_point(aes(x = student,
+                 y = rank)) +
+  # fitted
+  geom_point(aes(x = student, 
+                 y = .pred),
+             colour ="blue")
+
+# diversity
+p3 <- nrc_ns_train_pred %>% 
+  ggplot() +
+  # observed
+  geom_point(aes(x = diversity, 
+                 y = rank)) +
+  # fitted
+  geom_point(aes(x = diversity, 
+                 y = .pred),
+             colour ="blue")
+
+require(patchwork)
+p1 + p2 + p3
+
+# -------------------- test set --------------------
+# research
+p1 <- nrc_ns_test_pred %>% 
+  ggplot() +
+  # observed
+  geom_point(aes(x = research, 
+                 y = rank)) +
+  # fitted
+  geom_point(aes(x = research, 
+                 y = .pred),
+             colour = "blue")
+
+# student
+p2 <- nrc_ns_test_pred %>% 
+  ggplot() +
+  # observed
+  geom_point(aes(x = student,
+                 y = rank)) +
+  # fitted
+  geom_point(aes(x = student, 
+                 y = .pred),
+             colour ="blue")
+
+# diversity
+p3 <- nrc_ns_test_pred %>% 
+  ggplot() +
+  # observed
+  geom_point(aes(x = diversity, 
+                 y = rank)) +
+  # fitted
+  geom_point(aes(x = diversity, 
+                 y = .pred),
+             colour ="blue")
+
+require(patchwork)
+p1 + p2 + p3
+```
+
+**Training $R^2$ is** `r round(glance(nrc_ns_fit)$r.squared, 3)` **. The model explains about 60% of the variation in rank.  Test RMSE is** `r round(metrics(nrc_ns_test_pred, truth = rank, estimate = .pred)[1,3], 1)`. 
+
+**The use of splines improves the model fit a very small amount, based on $R^2$, but the RMSE is worse.**
+
+
+#### f. 
+
+Fit a GAM model. Report estimates, model fit statistics, and the test RMSE. Make the plots to visually assess the fit, including observed vs fitted, residual vs fitted, histogram of resisuals, normal probability plot of residuals, and the fitted vs each predictor.
+
+      trying with parsnip (WIP)
+```{r, eval=FALSE}
+# --- model specification
+gam_spec <- parsnip::gen_additive_mod() %>% 
+  parsnip::set_engine("mgcv") %>% 
+  parsnip::set_mode("regression")
+
+gam_spec %>% 
+  translate
+
+nrc_gam_rec <- recipes::recipe(rank ~ research + student + diversity,
+                               data = nrc_train)
+
+```
+
+      fitting GAM model
+```{r fig.width=6, fig.height=6}
+# mgcv::gam is not yet integrated with tidymodels
+
+# --- fit gam model
+nrc_gam <- mgcv::gam(rank ~ s(research) + s(student) + s(diversity),
+                     data = nrc_train)
+
+summary(nrc_gam)
+```
+
+      report estimates + model fit statistics + test set metrics
+```{r}
+# === `broom`
+broom::tidy(nrc_gam) # extract model coefs.; in tidy `tibble`
+
+broom::glance(nrc_gam) # extract model fit statistics
+
+# augment training set
+nrc_gam_train_pred <- broom::augment(x = nrc_gam, 
+                                     data = nrc_train) %>%
+  # rename .fitted to .pred
+  rename(.pred = .fitted)
+
+# augment test set
+nrc_gam_test_pred <- broom::augment(nrc_gam,
+                                    newdata = nrc_test) %>%
+  # rename .fitted to .pred
+  rename(.pred = .fitted) %>% 
+  # compute .resid = observed - predicted value
+  mutate(.resid = rank - .pred)
+
+# test set
+yardstick::metrics(data = nrc_gam_test_pred,
+                   # supply actual & predicted values
+                   truth = rank, 
+                   estimate = .pred)
+
+# training set
+yardstick::metrics(data = nrc_gam_train_pred,
+                   truth = rank, 
+                   estimate = .pred)
+```
+
+      diagnostic plots *with `gratia`
+```{r}
+# --- plot partial residuals plot
+gratia::draw(object = nrc_gam,
+             residuals = T) # include residual points
+
+# --- plot model diagnostics
+gratia::appraise(nrc_gam)
+```
+
+      plot observed response & predicted values; against each predictor
+•can be done for training & test set
+```{r fig.width=12}
+# --- plot the observed & fitted values; against each predictor
+
+# -------------------- training data --------------------
+pg1 <- nrc_gam_train_pred %>% 
+  ggplot() +
+  # observed
+  geom_point(aes(x = research, 
+                 y = rank)) +
+  # fitted
+  geom_point(aes(x = research, 
+                 y = .pred),
+             colour = "blue")
+
+pg2 <- nrc_gam_train_pred %>% 
+  ggplot() +
+  # observed
+  geom_point(aes(x = student, 
+                 y = rank)) +
+  # fitted
+  geom_point(aes(x = student, 
+                 y = .pred),
+             colour = "blue")
+
+pg3 <- nrc_gam_train_pred %>% 
+  ggplot() +
+  # observed
+  geom_point(aes(x = diversity, 
+                 y = rank)) +
+  # fitted
+  geom_point(aes(x = diversity, 
+                 y = .pred),
+             colour = "blue")
+
+require(patchwork)
+pg1 + pg2 + pg3
+
+# -------------------- test data --------------------
+pg1 <- nrc_gam_test_pred %>% 
+  ggplot() +
+  # observed
+  geom_point(aes(x = research, 
+                 y = rank)) +
+  # fitted
+  geom_point(aes(x = research, 
+                 y = .pred),
+             colour = "blue")
+
+pg2 <- nrc_gam_test_pred %>% 
+  ggplot() +
+  # observed
+  geom_point(aes(x = student, 
+                 y = rank)) +
+  # fitted
+  geom_point(aes(x = student, 
+                 y = .pred),
+             colour = "blue")
+
+pg3 <- nrc_gam_test_pred %>% 
+  ggplot() +
+  # observed
+  geom_point(aes(x = diversity, 
+                 y = rank)) +
+  # fitted
+  geom_point(aes(x = diversity, 
+                 y = .pred),
+             colour = "blue")
+
+require(patchwork)
+pg1 + pg2 + pg3
+```
+
+**GAMs don't report $R^2$. The deviance is** `r round(glance(nrc_gam)$deviance, 1)` **which is interpreted as what the model DOES NOT explain. Compare this with the overall total sum of squares of the response variable** `r sum((nrc_train$rank - mean(nrc_train$rank))^2) %>% round(1)` **would indicate that model explains about 56% of the variation in rank. Test RMSE is** `r round(metrics(nrc_gam_test_pred, truth = rank, estimate = .pred)[1,3], 1)`.
+
+**The additional use of GAMs improves the fit by a very small amount, based on $R^2$ but it is worse than the linear fit based on RMSE.**
+
+e. Based on the model fit statistics, and test mse, and plots, which model is best? How do the predictors relate to the rank? Are all the predictors important for predicting rank? Could the model be simplified?
+
+**The models perform very similarly, so we would choose the simpler one, linear regression. And recommend that for a final model, only to use research as a predictor.**
+
+### 2. (IF TIME ALLOWS) Lurking variables
+      
+      read in data
+```{r}
+# --- read in data
+wage <- ISLR::Wage %>% 
+  select(wage, logwage, # response
+         age, # predictor
+         jobclass, health, health_ins, race, maritl) %>% # factor variables *potential lurking variables
+  as_tibble()
+```
+
+
+#### a. 
+
+The wages data poses an interesting analytical dilemma. There appear to be two wage clusters, one small group with relatively consistent high wage, and the other big group with lower and varied wages. Make a histogram or a density plot of wage to check this more carefully. 
+
+      plots to confirm phenomenon
+```{r}
+# --- density plot
+ISLR::Wage %>% 
+  ggplot(aes(x = wage)) + 
+  geom_density()
+
+# --- histogram
+ISLR::Wage %>% 
+  ggplot(aes(x = wage)) + 
+  geom_histogram()
+
+# --- plot response (`wage`) against predictor (`age`)
+wage %>% 
+  ggplot(aes(x = age,
+             y = wage)) +
+  geom_point() +
+  # overlay smooth line
+  geom_smooth(aes(colour = "smooth"),
+              se = F) +
+  # overlay linear line
+  geom_smooth(aes(colour = "linear"),
+              method = "lm",
+              se = F) +
+  # customise colours
+  scale_colour_manual(name = "Model fit",
+                      breaks = c("smooth", "linear"),
+                      values = c("smooth" = "blue",
+                                 "linear" = "orange")) +
+  # edit breaks of y-axis
+  scale_y_continuous(breaks = seq(from = 0, to = 320, by = 50))
+```
+
+#### b. 
+
+What do you think might have caused this? Check the relationship between wage, and other variables such as `jobclass`. Do any of the other variables provided in the data explain the clustering?
+
+
+      looking for lurking variable
+```{r}
+# `jobclass`: type of job 
+a1 <- wage %>% 
+  ggplot(aes(x = age,
+             y = wage,
+             colour = jobclass)) +
+  geom_point(alpha = 0.5) +
+  # customise colour palettes
+  scale_colour_brewer("",
+                      palette = "Dark2") +
+  # remove legend
+  theme(legend.position = "none")
+
+# `health`: health level of worker
+a2 <- wage %>% 
+  ggplot(aes(x = age,
+             y = wage,
+             colour = health)) +
+  geom_point(alpha = 0.5) +
+  # customise colour palettes
+  scale_colour_brewer("",
+                      palette = "Dark2") +
+  # remove legend
+  theme(legend.position = "none")
+
+# `health_ins`: does worker has health insurance
+a3 <- wage %>% 
+  ggplot(aes(x = age,
+             y = wage,
+             colour = health_ins)) +
+  geom_point(alpha = 0.5) +
+  # customise colour palettes
+  scale_colour_brewer("",
+                      palette = "Dark2") +
+  # remove legend
+  theme(legend.position = "none")
+
+# `race`: race
+a4 <- wage %>% 
+  ggplot(aes(x = age,
+             y = wage,
+             colour = race)) +
+  geom_point(alpha = 0.5) +
+  # customise colour palettes
+  scale_colour_brewer("",
+                      palette = "Dark2") +
+  # remove legend
+  theme(legend.position = "none")
+
+# `maritl`: marital status
+a5 <- wage %>% 
+  ggplot(aes(x = age,
+             y = wage,
+             colour = maritl)) +
+  geom_point(alpha = 0.5) +
+  # customise colour palettes
+  scale_colour_brewer("",
+                      palette = "Dark2") +
+  # remove legend
+  theme(legend.position = "none")
+
+require(patchwork)
+a1 + a2 + a3 + a4 + a5
+```
+
+**No other variable in this collected data explains the cluster of salaries higher than $250. This is very likely, though, to be something simple like a "manager" position, and would be best called a "lurking variable".**
+
+#### c. 
+
+The textbook (Section 7.8.1 p.315) includes an analysis where a separate logistic model where a binary response ($\leq 250$, $>250$) is used. Why doesn't this make sense? 
+
+An alternative approach is to treat this as a "lurking variable", let's call it "manager", create a new predictor and include this in the model. Alternatively, we could treat the high group as outliers, and exclude them from the analysis. The argument for these values are likely due to some unobserved factor, and their presence affects the ability to accurately model the rest of the data. 
+
+
+**There is little support for predicting the wage above or below $250 on any of the variables available, which means it would be a weak model, at best.**
+
+### 3. (IF TIME ALLOWS) Explore the polynomial model fitting
+
+#### a. 
+
+This builds from the polynomial model fit for the Wage data, using variables wage and age, in Figure 7.1. 
+
+The function `poly` is a convenient way to generate a fourth-degree polynomial. By default it uses "orthogonal polynomials". 
+
+
+      read in data
+```{r}
+# --- read in data 
+wage <- as_tibble(ISLR::Wage) %>% 
+  # select relevant variables
+  select(wage, age)
+```
+
+
+      fitting polynomial regression; using orthogonal polynomials
+```{r}
+# --- `recipes`: preprocessing 
+rec_poly <- recipes::recipe(wage ~ age, 
+                            data = wage) %>%
+  recipes::step_poly(age, 
+                     degree = 4, 
+                     options = list(raw = FALSE)) # use orthonormal polynomials *default
+
+# under the hood: compute orthogonal polynomials on `age`
+stats::poly(wage$age,
+            degree = 4,
+            raw = F) %>% # use orthogonal polynomials
+  as_tibble()
+
+# --- model specification
+lm_spec <- parsnip::linear_reg() %>%
+  parsnip::set_mode("regression") %>% 
+  parsnip::set_engine("lm") # declare computational engline
+
+# --- create `workflow`
+poly_wf <- workflows::workflow() %>% # create/initialise workflow
+  workflows::add_recipe(rec_poly) %>% 
+  workflows::add_model(lm_spec) 
+
+# --- fit workflow object
+poly_fit <- parsnip::fit(object = poly_wf, 
+                         data = wage)
+
+broom::tidy(poly_fit)
+```
+
+#### b. 
+
+We can request that "raw" polynomials are generated instead, with the `raw=TRUE` argument. 
+
+
+      fitting polynomial regression; using raw polynomials
+```{r}
+# --- `recipes`: preprocessing 
+rec_raw_poly <- recipes::recipe(wage ~ age, 
+                                data = wage) %>%
+  recipes::step_poly(age, 
+                     degree = 4, 
+                     options = list(raw = TRUE)) # use raw polynomials
+
+# under the hood: compute raw polynomials
+stats::poly(wage$age,
+            degree = 4,
+            raw = T) %>% # use raw polynomials
+  as_tibble()
+
+# --- create workflow
+raw_poly_wf <- workflow() %>% # create/initialise workflow
+  add_model(lm_spec) %>%
+  add_recipe(rec_raw_poly)
+
+# --- fit `workflow` object
+raw_poly_fit <- parsnip::fit(raw_poly_wf, 
+                             data = wage)
+
+broom::tidy(raw_poly_fit)
+```
+
+
+#### c. 
+
+The coefficients are different, but effectively the fit is the same, which can be seen by plotting the fitted values from the two models.
+
+
+      check predicted values are the same; with both raw & orthogonal polynomials
+•plot fitted polynomial function; for both
+```{r}
+# --- include fitted value columns
+wage_fit <- wage %>% 
+  bind_cols(
+    # predictions; from orthogonal polynomials
+    .pred_poly = stats::predict(object = poly_fit,
+                                new_data = wage) %>% pull(.pred),
+    # predictions; from raw polynomials
+    .pred_raw_poly = stats::predict(object = raw_poly_fit,
+                                    new_data = wage) %>% pull(.pred) 
+      )
+  
+# --- plot predictions using raw polynomials against predictions using orthogonal polynomials
+wage_fit %>% 
+  ggplot() +
+  geom_point(aes(x = .pred_poly,
+                 y = .pred_raw_poly)) +
+  theme(aspect.ratio = 1)
+
+# --- plot predictions; overlay data pts.
+
+# overlay orthogonal polynomial predictions
+p1 <- wage_fit %>% 
+  ggplot() +
+  geom_point(aes(x = age,
+                 y = wage),
+             colour = "grey") +
+  geom_line(aes(x = age,
+                y = .pred_poly),
+            size = 1.5) 
+
+# overlay raw polynomial predictions
+p2 <- wage_fit %>% 
+  ggplot() +
+  geom_point(aes(x = age,
+                 y = wage),
+             colour = "grey") +
+  geom_line(aes(x = age,
+                y = .pred_raw_poly),
+            size = 1.5)
+
+p1 + p2
+```
+
+•plot predicted values from raw polynomials vs. predicted values from orthogonal polynomials
+```{r}
+wage_fit <- Wage %>% bind_cols(
+   predict(poly_fit, Wage),
+   predict(raw_poly_fit, Wage)) %>%
+  rename(.pred_poly = .pred...12, 
+         .pred_raw_poly = .pred...13) 
+
+ggplot(wage_fit, aes(x=.pred_poly,
+                     y=.pred_raw_poly)) + 
+  geom_point() + theme(aspect.ratio = 1)
+```
+
+#### d. 
+
+To examine the differences between orthonormal polynomials and "raw" polynomials, we can make scatterplot matrices of the two sets of polynomials. 
+
+      scatterplot matrix of raw & orthogonal polynomials; looking for multicollinearity
+```{r}
+# --- plot scatterplot matrix; of transformed variables
+
+# orthogonal polynomials
+p_orth <- stats::poly(wage$age,
+                      degree = 4,
+                      raw = F) %>% # orthogonal polynomials
+  as_tibble()
+
+GGally::ggscatmat(p_orth) # scatterplot matrix
+
+# raw polynomials
+p_raw <- stats::poly(wage$age,
+                     degree = 4,
+                     raw = T) %>% # raw polynomials
+  as_tibble()
+
+GGally::ggscatmat(p_raw) # scatterplot matrix
+```
+
+
+# e. 
+
+**Think about:** What is the benefit of using orthonomal polynomials?
+
+**As higher order raw polynomials are added multicollinearity is introduced. The orthogonal polynomials add perturbations to the function preventing linear dependency between terms.**
+
+
+
+## 💬 Class discussion exercises, part of the wrap up
+
+Why do you think polynomials and splines considered to be part of recipes rather than the model fitting?
+
+**Both of these are transformations of the predictors, and are best considered to be pre-processing (feature engineering) of the data prior to modeling.** 
+
+
