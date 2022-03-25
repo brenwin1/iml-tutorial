@@ -1,0 +1,409 @@
+---
+title: "ETC3250/5250 Tutorial 4 Solution"
+subtitle: "Dimension reduction"
+author: "prepared by Professor Di Cook"
+date: "Week 4"
+output:
+  html_document:
+    after_body: tutorial-footer.html
+    css: tutorial.css
+---
+
+```{r setup, echo = FALSE, message = FALSE, warning = FALSE, warning = FALSE}
+knitr::opts_chunk$set(
+  message = FALSE,
+  warning = FALSE,
+  error = FALSE, 
+  collapse = TRUE,
+  comment = "#",
+  fig.height = 4,
+  fig.width = 8,
+  fig.align = "center",
+  cache = FALSE
+)
+
+# load libraries
+library(tidyverse); ggplot2::theme_set(theme_bw())
+library(tidymodels)
+library(emo)
+library(ggrepel)
+library(kableExtra)
+library(plotly)
+```
+
+
+
+## `r emo::ji("gear")` Exercises 
+
+
+## 1. Logistic regression
+
+This question expects you to work through some equations for logistic regression, by hand, using the following data:
+
+      create data of x, y values + plot data
+```{r}
+# --- create data
+d <- tibble(x = c(1.5, 2.0, 2.1, 2.2, 2.5, 3, 3.1, 3.9, 4.1), 
+            y = c(0, 0, 0, 1, 0, 1, 0, 1, 1))
+
+# --- show data in table
+d # %>% 
+  # # in table form
+  # knitr::kable() %>% 
+  # kableExtra::kable_styling(full_width = FALSE)
+
+# --- plot data
+d %>% 
+  ggplot(aes(x = x,
+             y = y)) +
+  geom_point()
+```
+
+### a. 
+
+Write out likelihood function, as function of $\beta_0$ and $\beta_1$. (The equation in lecture 3a, at the top of slide 9 is the one you need.)
+
+**This is the best way to write it**
+
+$$l(\beta_0, \beta_1) = \prod_{i=1}^9p(x_i)^{y_i}p(x_i)^{(1-y_i)}$$
+
+### b.
+
+Show that the log likelihood 
+
+$$\sum_{i=1}^9 \{y_i\log{p(x_i)} +(1-y_i)\log{(1-p(x_i))}\}$$
+
+where $p(x_i) = P(Y=1|x_i) = \frac{1}{e^{-z_i}+1} = \frac{e^{z_i}}{e^{z_i}+1}$ and $z_i=\beta_0 + \beta_1x_i$, can be written as 
+
+$$\sum_{i=1}^9\{y_i(\beta_0+\beta_1x_i)-\log{(1+e^{\beta_0+\beta_1x_i})}\}$$. 
+
+Justify each of the steps you make in the algebra.
+
+\begin{align*}
+\log~l(\beta_0, \beta_1) = &\sum_{i=1}^9 \{y_i\log{p(x_i)} +(1-y_i)\log{(1-p(x_i))}\} ~~~ \mbox{log of a product is a sum of logs}\\
+ = &\sum_{i=1}^9~\{y_i(\log p(x_i)-\log(1-p(x_i))) + \log (1-p(x_i))\} ~~~ \mbox{group } y_i\\
+ = &\sum_{i=1}^9~y_i\log\frac{p(x_i)}{(1-p(x_i))} + \log (1-p(x_i)) ~~~ \mbox{difference of logs is a log of quotient} \\
+ = &\sum_{i=1}^9 \{y_i\log\frac{\frac{e^{z_i}}{e^{z_i}+1}}{(1-\frac{e^{z_i}}{e^{z_i}+1})} + \log (1-\frac{e^{z_i}}{e^{z_i}+1})\} ~~~ \mbox{substitute } p(x_i) = \frac{e^{z_i}}{e^{z_i}+1} \\
+ = &\sum_{i=1}^9 \{y_i\log\frac{e^{z_i}}{1+e^{z_i}-e^{z_i}} + \log (1-\frac{1+e^{z_i}-e^{z_i}}{1+e^{z_i}})\} ~~~ \mbox{reduce} \\
+ = & \sum_{i=1}^9 \{y_i\log e^{z_i} + \log\frac{1}{1+e^{z_i}}\} ~~~ \mbox{reduce}\\
+ = & \sum_{i=1}^9 \{y_i z_i - \log (1+e^{z_i})\} ~~~ \mbox{log of exp, and invert quotient} \\
+ = &\sum_{i=1}^9\{y_i(\beta_0+\beta_1x_i)-\log{(1+e^{\beta_0+\beta_1x_i})}\} ~~~ \mbox{substitute } z_i=\beta_0 + \beta_1x_i
+\end{align*}
+
+
+
+### c.
+
+Plot the function for different values of $\beta_0$ and $\beta_1$, or if you prefer, you can solve the equation analytically, to find the maximum, and thus to provide parameter estimates. (Even if you can't do part b, you can write the R function to compute the log likelihood for the sample, and complete this question.)
+
+      run grid search; plot likelihood for different $\beta_0$ and $\beta_1$ vaues
+```{r}
+# === do a grid search; find \beta_0 & \beta_1; maximise lik.
+
+# --- create grid of \beta_0 & \beta_1 value
+d_grid <- tidyr::expand_grid(b0 = seq(from = -8, to = 4, by = 0.05), 
+                             b1 = seq(from = 1, to = 4, by = 0.05))
+
+# --- likelihood function; compute likelihood
+likelihood <- function(x, y, b0, b1) { 
+  sum(y * (b0 + b1*x) - log(1 + exp(b0+b1*x)))
+}
+
+# compute likelihood; for each `b0` & `b1` combination
+d_grid <- d_grid %>%
+  rowwise() %>% # instead of column-wise
+  mutate(l = likelihood(d$x, d$y, b0, b1)) %>%
+  ungroup()
+
+# extract \beta_0 & \beta_1 values; that maximise likelihood
+estimates <- d_grid %>% 
+  arrange(desc(l)) %>% 
+  slice(1)
+
+# --- plot results 
+d_grid %>% 
+  ggplot() +
+  # plot tiles filled by likelihood value
+  geom_tile(aes(x = b0,
+                y = b1,
+                fill = l)) +
+  scale_fill_viridis_c() +
+  # plot black pt. on b0 & b1 value; that maximise likelihood (`l`)
+  geom_point(aes(x = b0,
+                 y = b1),
+             colour = "black",
+             data = estimates) +
+  theme_bw() +
+  theme(aspect.ratio = 1)
+```
+
+
+### d.
+
+Check that you got it correct, by actually fitting the model.
+
+      fit logistic reg. model
+•check if grid search; correspond to our results
+```{r}
+# --- model specification
+logistic_mod <- parsnip::logistic_reg() %>% # (I) model specification
+  parsnip::set_engine("glm") %>% # (II) set engine
+  parsnip::set_mode("classification")  # (III) set mode
+
+logistic_mod %>% 
+  parsnip::translate()
+
+d <- d %>%
+  # turn y (response) into factor
+  mutate(y_f = factor(y))
+
+# --- fit logistic reg. model
+d_fit <- logistic_mod %>% 
+  parsnip::fit(y_f ~ x, 
+               data = d)
+```
+
+      broom::tidy & broom::glance
+```{r}
+broom::tidy(d_fit)
+
+broom::glance(d_fit)
+```
+
+- logLik: -4.094625; same as our grid search!
+
+### e.
+
+Write down the model equation using the parameter estimates.
+
+$$P(Y=1|x_i) = \frac{e^{(-6.05 + 2.15x_i)}}{1+e^{(-6.05 + 2.15x_i)}}$$
+> the inverse logit function! (back-transform to our probability)
+
+### f.
+
+Plot your data and the fitted model.
+
+```{r}
+# --- include fitted line; using inverse logit function
+d <- d %>%
+  mutate(pred = (exp(-6.05 + 2.15*x)) / (1+exp(-6.05 + 2.15*x)))
+
+# # --- plot fitted squiggly line
+d %>%
+  ggplot(aes(x = x,
+             y = y)) +
+  geom_point() +
+  geom_line(aes(y = pred),
+            colour = "#ff7f00")
+
+# --- create function *more precise (instead of connecting the dots)
+inverse_logit_fun <- function(x){
+  (exp(-6.05 + 2.15*x)) / (1+exp(-6.05 + 2.15*x))
+}
+
+d %>% 
+  ggplot(aes(x = x,
+             y = y)) +
+  geom_point() +
+  geom_function(fun = inverse_logit_fun,
+                colour = "#ff7f00")
+```
+
+## 2. Principal Component Analysis
+
+Here we are going to examine cross-rates for different currencies relative to the US dollar, to examine how the currencies changed as COVID-19 appeared. Some currencies moved in similar directions, and some opposite, some reacted strongly, and others not at all. PCA can help you to extract these differences. 
+
+A cross-rate is *an exchange rate between two currencies computed by reference to a third currency, usually the US dollar.*
+
+The data file `rates_Nov19_Mar20.csv` was extracted from https://openexchangerates.org.
+
+### a. What's the data? Make a plot of the Australian dollar against date. Explain how the Australian dollar has changed relative to the US dollar over the 5 month period.
+
+*Over the 5 month period the Australian dollar has weakened against the US dollar, with a big  decline in mid-March as the coronavirus impact affected the world.*
+
+      read in `rates` data
+```{r}
+rates <- read_csv(here::here("data/rates_Nov19_Mar20.csv"))
+
+# select relevant currencies
+rates_sub <- rates %>%
+  select(date, AUD, CAD, CHF, CNY, EUR, GBP, INR, JPY, KRW, MXN, NZD, RUB, SEK, SGD, ZAR)
+```
+
+      plot data
+```{r}
+rates %>% 
+  ggplot(aes(x = date,
+             y = AUD)) +
+  geom_line()
+```
+
+### b. You are going to work with these currencies: AUD, CAD, CHF, CNY, EUR, GBP, INR, JPY, KRW, MXN, NZD, RUB, SEK, SGD, ZAR. List the names of the countries and currency name that these codes refer to. Secondary question: why is the USD a constant 1 in this data. 
+
+*AUD = Australian dollar, CAD = Canadian dollar, CHF = Swiss franc, CNY = Chinese yuan, GBP = British pound, INR = Indian rupee, JPY = Japanes yen, KRW = Korean won, MXN = Mexican peso, NZD = New Zealand dollar, RUB = Russian ruble, SEK = Swedish krone, SGD = Singapore dollar, ZAR = South African rand.*
+
+*The US is the base rate, against which all other currencies are compared.*
+
+### c. PCA preprocessing
+
+The goal of the principal component analysis is to examine the relative movement of this subset of currencies, especially since coronavirus emerged until the end of March. PCA is used to summarise the volatility (variance) in the currencies, relative to each other. To do this you need to: 
+
+    - Flip the sign so that high means the currency strengthened against the USD, and low means that it weakened. Its easier to explain trends, if you don't need to talk with double-negatives.
+    - Make a plot of all the currencies to check the result.
+      standardise (mean normalise) all variables + flip signs
+•resulting values; have mean = 0// sd = 1 *required everytime you do PCA
+-> so; each variable; set to potentially have equal contribution to the PCs
+-> avoid having to deal with different scales of each variable
+
+•flip signs; so; easier to read & explain trends *special case; dealing with currencies
+```{r}
+# --- mean normalise variables
+rates_sub <- rates_sub %>%
+  mutate(across(.cols = where(is.numeric),
+                .fns = function(x) -1*(x - mean(x)) / sd(x))) # flip the sign; so; easier; read currency rates
+
+# # OR 
+# rates_sub <- rates_sub %>%
+#   mutate_if(is.numeric, function(x) -1*(x-mean(x))/sd(x))
+
+# --- e.g. plot AUD against date; after preprocessing
+rates_sub %>% 
+  ggplot(aes(x = date,
+             y = AUD)) +
+  geom_line()
+```
+    
+      plot all cross currencies
+```{r}
+# --- put data in long form; for plotting
+rates_sub_long <- rates_sub %>% 
+  pivot_longer(cols = AUD:ZAR,
+               names_to = "currency",
+               values_to = "crossrate") 
+
+# --- plot
+rates_sub_long %>% 
+  ggplot(aes(x = date,
+             y = crossrate,
+             colour = currency)) + 
+  geom_line() +
+  scale_colour_viridis_d("")
+
+plotly::ggplotly() # interactive plot; to browse the currencies
+```
+
+### d. Conduct a principal component analysis on the subset of currencies. You need to work from a wide format of the data, where dates are in the columns, and currencies are in the rows. Normally, PCA operates on standardised variables but for this data, you need to NOT standardise each date. Think about why this is best.
+    
+    - Plot the loadings for PC1. Add a base line set at $1/\sqrt{15}$. Why use this as a guide? What time frame generated a big movement (or divergence) in the currencies? Which currencies strengthened relative to the USD in that period? What happened to the Australian dollar? Answer these questions in a paragraph, written in your own words. 
+*The time period in March shows the greatest volatility in the currencies. The Euro, yen and france strengthened against the USD. The Australian dollar dropped in value substantially. This can be seen from time series plot, also.*
+    
+    - Do the same analysis for PC2. In what time frame was there another movement of currencies? Which currencies primarily strengthened, and which weakened during this period? 
+*From PC2 we can see that the Chinese yuan and Swiss franc are moving opposite to the Euro and yen. These correspond to various dates. In mid-January the yuan strengthened, and the yen declined. Early in the time period, November and December, the yuan and franc weakened. The Euro weakened in mid-February.*
+    
+    - Finish with a paragraph summarising what variability the principal components analysis is summarising. What dimension reduction is being done? 
+*PCA is summarising the main patterns  of relative change in the currencies. It can be useful to get some rough understanding of the major fluctuations.*
+    
+      put data in wide form
+```{r}
+# --- wide form
+rates_sub_wide <- rates_sub_long %>%
+  pivot_wider(id_cols = currency, 
+              names_from = date,
+              values_from = crossrate)
+```
+
+      - Why is this data considered to be high-dimensional? 
+*There are many more variables than observations, because we are considering the dates to be variables, and the currencies to be observations.*
+
+
+      run PCA
+•PCA; only applies to non-numeric variables
+```{r}
+# --- perform PCA
+rates_pca <- stats::prcomp(rates_sub_wide %>% select(-currency), # remove `currency` column 
+                           scale = FALSE) # already standardised & in same units
+```
+
+on 4B slide 7
+- rotation: PCs: $\phi_1 + ... + \phi_p$
+- x: $z_1 ... z_p$
+
+      Make a scree plot; summarise the variance explained by cumulative principal components.
+```{r}
+stats::screeplot(rates_pca,
+                 type = "lines")
+
+summary(rates_pca) 
+```
+
+      - How much of the total variation do two PCs explain? 
+*Two PCs explain 81% of the total variation.*
+
+      plot PC2 against PC1
+```{r}
+rates_pca$x %>% # extract loadings/weights
+  as_tibble() %>% 
+  mutate(currency = rates_sub_wide$currency) %>% # add back `currency` column
+  # plot
+  ggplot(aes(x = PC1,
+             y = PC2)) + 
+  geom_point() + # add points
+  # label points with `currency`
+  geom_text_repel(aes(x = PC1,
+                      y = PC2,
+                      label = currency)) + 
+  theme(aspect.ratio = 1) +
+  # label axes with proportion of variance explained by each PC
+  labs(x = paste0("PC1 (", summary(rates_pca)$importance[2, 1] %>% round(2), ")"), # extract proportion of variance explained by PC1
+       y = paste0("PC2 (", summary(rates_pca)$importance[2, 2] %>% round(2), ")")) # extract proportion of variance explained by PC2
+```
+
+      - Write a summary of what you learn about the similarity and difference between the currencies. 
+      
+*Most of the currencies are reacting similarly because they are clumped together in the plot. The Chinese yuan, Swiss franc, Japanese yen and Euro are all behaving individually because each is something of an outlier in this plot.*
+
+
+
+```{r}
+rates_pc_loadings <- as_tibble(rates_pca$rotation[,1:2]) %>% # extract loadings of PC1 & PC2 (\phi_{i1} & \phi_{i2})
+  mutate(date = rownames(rates_pca$rotation), # bring date back
+         indx = 1:nrow(rates_pca$rotation), # add index
+         ymin = rep(0, nrow(rates_pca$rotation))) # for error bar (start from 0)
+
+# --- plot loadings of PC1
+rates_pc_loadings %>% 
+  ggplot() + 
+  geom_hline(yintercept = c(-1 / sqrt(nrow(rates_pca$rotation)), # -1/sqrt(152)
+                            1 / sqrt(nrow(rates_pca$rotation))), # 1/sqrt(152)
+             colour = "red") + 
+  geom_errorbar(aes(x = as.Date(date),
+                    ymin = ymin,
+                    ymax = PC1)) +
+  geom_point(aes(x = as.Date(date),
+                 y = PC1)) +
+  # date labels month
+  scale_x_date("",
+               date_breaks = "1 month",
+               date_labels = "%b")
+```
+      
+      plot loadings for PC2
+```{r}
+# --- plot loadings for PC2
+rates_pc_loadings %>% 
+  ggplot() + 
+  geom_hline(yintercept = c(-1 / sqrt(nrow(rates_pca$rotation)), # -1 / sqrt(152)
+                            1 / sqrt(nrow(rates_pca$rotation))), # 1 / sqrt(152)
+             colour = "red") +  
+  geom_errorbar(aes(x = as.Date(date),
+                    ymin = ymin,
+                    ymax = PC2)) +
+  geom_point(aes(x = as.Date(date),
+                 y = PC2)) +
+  # date labels month
+  scale_x_date("",
+               date_breaks = "1 month",
+               date_labels = "%b")
+```
+
+##### © Copyright 2022 Monash University
