@@ -1,0 +1,538 @@
+---
+title: "ETC3250/5250 Tutorial 7 Solution"
+subtitle: "Tree models"
+author: "prepared by Professor Di Cook"
+date: "Week 7"
+output:
+  html_document:
+    after_body: tutorial-footer.html
+    css: tutorial.css
+---
+
+```{r setup, echo = FALSE, message = FALSE, warning = FALSE, warning = FALSE}
+knitr::opts_chunk$set(
+  message = FALSE,
+  warning = FALSE,
+  error = FALSE, 
+  eval = TRUE,
+  collapse = TRUE,
+  comment = "#",
+  fig.height = 4,
+  fig.width = 8,
+  fig.align = "center",
+  cache = FALSE
+)
+
+# --- load libraries
+library(emo)
+library(tidyverse); ggplot2::theme_set(theme_bw())
+library(tidymodels)
+library(knitr)
+library(kableExtra)
+library(tidymodels)
+library(rpart.plot)
+library(discrim)
+library(tourr)
+```
+
+
+## `r emo::ji("gear")` Exercises 
+
+### 1. This question is about entropy as an impurity metric  for a classification  tree.
+
+a. Write down the formula for entropy as an impurity measure for two groups. 
+$$- \hat{p}_{1} log_2(\hat{p}_{1}) -  \hat{p}_{2} log_2(\hat{p}_{2})$$
+b. Establish that the the worst case split has 50% one group and 50% the other group, in whatever way you  would like (algebraicly or graphically).
+
+      graphically
+```{r}
+p <- seq(from = 0.01, to = 0.99, by = 0.01) # allow p; take values from 0.01 to 0.99
+
+entropy <- (-p * log(p)) - ((1-p) * log(1-p)) # apply entropy formula
+
+# put p & entropy; into tibble (for plot)
+df <- tibble(p, 
+             entropy)
+
+# plot
+df %>% 
+  ggplot(aes(x = p,
+             y = entropy)) +
+  geom_line() +
+  # add vertical line @ p = 0.5
+  geom_vline(xintercept = 0.5,
+             colour = "red",
+             size = 0.5) +
+  labs(y = "entropy") 
+```
+
+**The highest value occurs when $p=0.5$, which is the worst possible value the impurity can take.**
+
+c. Extend the entropy formula so that it can be used to describe the  impurity for a possible  split of the data into two subsets. That is, it needs  to be the sum of the impurity for both left and right subsets of data.
+
+**Let $L$ indicate the subset of observations to the left of the split, and $R$ indicate those to the right.**
+
+$$p_L(- \hat{p}_{L1} log_2(\hat{p}_{L1}) -  \hat{p}_{L2} log_2(\hat{p}_{L2}))  + p_R(-\hat{p}_{R1} log_2(\hat{p}_{R1}) - \hat{p}_{R2} log_2(\hat{p}_{R2}))$$
+
+### 2. Computing impurity
+
+      create data (group A & B) & plot 
+```{r}
+# data
+df <- tibble(x = c(1,3,4,5,7), 
+             y = c("A", "B", "A", "B", "B"))
+
+# plot
+df %>% 
+  ggplot() +
+  geom_point(aes(x = x,
+                 y = y))
+```
+
+a. Compute the entropy impurity metric for all possible splits.
+
+      plot splits
+```{r}
+# --- plot splits
+df %>% 
+  ggplot() +
+  # plot splits
+  geom_point(aes(x = x,
+                 y = y)) +
+  geom_vline(xintercept = 2,
+             colour = "red") +
+  geom_vline(xintercept = 3.5,
+             colour = "red") +
+  geom_vline(xintercept = 4.5,
+             colour = "red") +
+  geom_vline(xintercept = 6,
+             colour = "red") +
+  # add text
+  annotate(geom = "text",
+           x = 2,
+           y = 2.5,
+           label = "2") +
+  annotate(geom = "text",
+           x = 3.5,
+           y = 2.5,
+           label = "3.5") +
+  annotate(geom = "text",
+           x = 4.5,
+           y = 2.5,
+           label = "4.5") +
+  annotate(geom = "text",
+           x = 6,
+           y = 2.5,
+           label = "6")
+```
+```{r}
+splits <- tibble(split = c(2, 3.5, 4.5, 6), # splits
+                 
+                 # impurity calculation 
+                 impurity = c(4/5*(-1/4*log(1/4)-3/4*log(3/4)), # split @ 2: 
+                              2/5*(-2*1/2*log(1/2))+3/5*(-1/3*log(1/3)-2/3*log(2/3)), # split @ 3.5
+                              3/5*(-2/3 * log(2/3) - 1/3 * log(1/3)), # split @ 4.5
+                              4/5*(-2/4 * log(2/4) - 2/4 * log(2/4)))) # split @ 6
+# splits %>% 
+#   kable() %>%
+#   kable_styling(full_width = F)
+```
+      
+
+
+```{r}
+splits <- tibble(split = c(2, 3.5, 4.5, 6), 
+                 
+                 # compute impurity measure; for each split
+                 impurity = c(4/5*(-1/4*log(1/4) - 3/4 * log(3/4)), # split @ 2
+                              2/5*(-1/2 * log(1/2) - 1/2 * log(1/2)) + 3/5*(-1/3 * log(1/3) - 2/3 * log(2/3)), # split @ 3.5
+                              3/5*(-2/3*log(2/3)-1/3*log(1/3)), # split @ 4.5
+                              4/5*(-2*1/2*log(1/2))) ) # split @ 6
+splits %>% kable() %>%
+  kable_styling(full_width = F)
+```
+
+b. Write  down the classification rule for the tree that would  be formed for the best split.
+    
+**If $x>4.5$ classify new observation to group B.**    
+    
+### 3. Write decision tree model
+
+For the following data set, compute the default classification tree. Write out the tree rules, and also sketch the boundary between classes.
+
+a. olive oils,  for three regions
+
+      read in data
+```{r out.width="80%", fig.width=6}
+olive <- read_csv("http://www.ggobi.org/book/data/olive.csv") %>%
+  rename(name = `...1`) %>%
+  dplyr::select(-name, -area) %>%  
+  mutate(region = factor(region))
+```
+
+      fit classification tree
+```{r}
+# --- using rpart
+# olive_rp <- rpart::rpart(region ~ .,
+#                          data = olive)
+
+# --- using `tidymodels` workflow *recommended
+
+# specify classification tree model
+class_tree_spec <- parsnip::decision_tree() %>% # (I) model specification
+  parsnip::set_engine("rpart") %>% # (II) set engine
+  set_mode("classification") # (III) set mode
+
+# fit tree
+class_tree_fit <- class_tree_spec %>% 
+  parsnip::fit(region ~ .,
+               data = olive)
+```
+
+      plot the classification tree; to write tree rules
+```{r}
+# --- plot the classification tree
+rpart.plot::prp(class_tree_fit$fit, # extract `rpart` model fit object
+                type = 3, # draw separate split labels; for left & right directions
+                ni = TRUE, # display node indeces 
+                nn = TRUE, # display node numbers
+                extra = 2, # display classification rate at node
+                box.palette = "RdBu") # palette to colour node boxes
+```
+
+      sketch boundaries induced by classification tree
+```{r}
+class_tree_fit
+# --- sketch boundaries induced by classification tree
+# plot original data point; colour by region
+olive %>% 
+  ggplot(aes(x = eicosenoic,
+             y = linoleic,
+             colour = region)) +
+  geom_point() + 
+  scale_color_brewer("", palette="Dark2") +
+  # include boundaries
+  geom_vline(xintercept = 6.5) + # vertical line
+  # horizontal line
+  annotate(geom = "line", 
+           x = c(0, 6.5), 
+           y = c(1053.5, 1053.5))
+```
+
+b. chocolates, for type
+
+      read in data
+```{r}
+choc <- readr::read_csv(here::here("data/chocolates.csv")) %>%
+  select(Type:Protein_g)
+```
+      
+      fit classification tree
+```{r}
+# # --- using `rpart`
+# choc_rp <- rpart::rpart(Type ~ .,
+#                         data = choc)
+
+# --- using `tidymodels` workflow *recommended
+
+# specify classification tree model
+class_tree_spec <- parsnip::decision_tree() %>% # (I) model specification
+  parsnip::set_engine("rpart") %>% # (II) set engine
+  set_mode("classification") # (III) set mode
+
+class_tree_spec %>% 
+  parsnip::translate()
+
+# change response to factor
+choc <- choc %>%
+  mutate(Type = factor(Type))
+
+# fit tree
+class_tree_fit <- class_tree_spec %>% 
+  parsnip::fit(Type ~ .,
+               data = choc)
+```
+
+      plot the classification tree; to write tree rules
+```{r}
+# --- plot the classification tree
+rpart.plot::prp(class_tree_fit$fit, # extract `rpart` model fit object
+                type = 3, # draw separate split labels; for left & right directions
+                ni = TRUE, # display node indeces 
+                nn = TRUE, # display node numbers
+                extra = 2, # display classification rate at node
+                box.palette = "RdBu") # palette to colour node boxes
+```
+
+
+      sketch boundaries; induced by boundaries
+```{r, out.width="80%", fig.width=6}
+choc %>%
+  # include data pts.
+  ggplot(aes(x = Fiber_g,
+             y = CalFat,
+             colour = Type)) +
+  geom_point() + 
+  scale_color_brewer("", 
+                     palette="Dark2") +
+  # include boundaries
+  geom_vline(xintercept = 4.83) + # vertical line
+  # horizontal line
+  annotate("line",
+           x = c(0, 4.83), 
+           y = c(337.7, 337.7))
+```
+
+
+c. flea, for species
+
+      read in data
+```{r}
+tourr::flea
+```
+
+      fit classification tree
+```{r}
+# --- using `rpart`
+# flea_rp <- rpart::rpart(species ~ .,
+#                         data = flea)
+
+# --- using `tidymodels` workflow *recommended
+
+# specify classification tree model
+class_tree_spec <- parsnip::decision_tree() %>% # (I) model specification
+  parsnip::set_engine("rpart") %>% # (II) set engine
+  set_mode("classification") # (III) set mode
+
+class_tree_spec %>% 
+  parsnip::translate()
+
+# fit tree
+class_tree_fit <- class_tree_spec %>% 
+  parsnip::fit(species ~ .,
+               data = tourr::flea)
+```
+
+      plot decision tree; to write tree rules
+```{r}
+# --- plot the classification tree
+rpart.plot::prp(class_tree_fit$fit, # extract `rpart` model fit object
+                type = 3, # draw separate split labels; for left & right directions
+                ni = TRUE, # display node indeces 
+                nn = TRUE, # display node numbers
+                extra = 2, # display classification rate at node
+                box.palette = "RdBu") # palette to colour node boxes
+```
+      
+
+```{r, out.width="80%", fig.width=6}
+flea %>% 
+  # plot data pts.
+  ggplot(aes(x = aede3,
+             y = tars1, 
+             colour = species)) +
+  geom_point() + 
+  scale_color_brewer("", palette="Dark2") +
+  # add boundaries
+  geom_vline(xintercept=93.5) + # vertical line
+  # horizontal line
+  annotate(geom = "line", 
+           x = c(93.5, 123),
+           y = c(159, 159)) 
+```
+
+### 4. Which model should perform best
+
+For the crabs data, make a new variable combining species and gender into one class variable.
+
+a. Use the  grand and guided tour with the LDA index to  examine  the data. Describe the shape. Between LDA and a classification  tree which do  you expect to perform better on this  data?
+
+      read in data
+```{r}
+crabs <- read_csv("http://www.ggobi.org/book/data/australian-crabs.csv") %>%
+  mutate(class = interaction(species, sex)) %>% # combine `species` & `gender` into 1 class
+  dplyr::select(-index, -species,-sex)
+```
+
+      run grand & guided tour
+```{r}
+# --- grand tour
+tourr::animate_xy(data = crabs[,1:5],
+                  tour_path = grand_tour(d = 2),
+                  col = crabs$class)
+
+# --- guided tour
+tourr::animate_xy(data = crabs[,1:5],
+                  tour_path = guided_tour(lda_pp(crabs$class)),
+                  col = crabs$class)
+```
+
+
+**The variables are highly correlated, and the difference between groups uses a combination of variables. Trees will have a difficult time  with this data. LDA should perform better.**
+
+b. Use 10-fold cross-validation to determine the best choice of minsplit, for the training set of an 80:20 training:test split of the original data. (Check the code from the lecture 6a/b notes to use as an example.)
+
+      •split training into training & test 
+      •model specification + create `rsample` object for k = 10 folds
+      •create grid of hyperparam values.
+•2 ways; create grid of hyperparam. values
+(i) `dials::regular_grid`; using in-built parmaeter generating functions
+(ii) `tidyr::expand_grid`: manually; create a df of all combinations of hyperparam. values provided
+```{r}
+set.seed(20200429)
+
+# --- split data; 80% training 20% test
+crabs_split <- rsample::initial_split(crabs, 
+                                      prop = 0.8) # proportion of training set
+
+# extract training and test set
+crabs_tr <- rsample::training(crabs_split)
+crabs_ts <- rsample::testing(crabs_split)
+
+# --- model specification with `tune()` placeholders; for hyperparams. to be tuned
+
+# (I) model specification
+tune_spec <- parsnip::decision_tree(cost_complexity = tune(), # <<
+                                    min_n = tune()) %>% # <<
+  set_engine("rpart") %>% # (II) set engine 
+  set_mode("classification") # (III) set mode
+
+# --- create 10 folds
+crabs_folds <- rsample::vfold_cv(crabs_tr, 
+                                 v = 10)
+
+# --- create grid
+## rows containing tuning param. candidates
+## columns containing each tuning param.
+
+tree_grid <- dials::grid_regular(parameters(min_n(),
+                                            cost_complexity()),
+                                 # specify no. of values of each params. to use to make regular grid
+                                 levels = c(min_n = 30, 
+                                            cost_complexity = 1)) 
+
+tree_grid <- tidyr::expand_grid(min_n = 5:20,
+                                cost_complexity = c(0.01, 0.005, 0.001))
+```
+
+```{r}
+# --- create workflow
+tree_wf <- workflows::workflow() %>%
+  workflows::add_model(tune_spec) %>%
+  workflows::add_formula(class ~ .) # or `recipe` usually
+
+tree_res <- tree_wf %>% 
+  # run model tuning; via grid search
+  # i.e. fit tree model; with all combinations of `cost_complexity` & `min_n`
+  tune::tune_grid(resamples = crabs_folds,
+                  grid = tree_grid)
+```
+
+      plot tuning results
+```{r, out.width="80%"}
+# pipe results of `tune_grid`; into collect_metrics
+crabs_tune <- tree_res %>%
+  tune::collect_metrics() # obtains & format results; produced by tuning functions (into tibble)
+
+# data wrangling; for plotting
+crabs_tune <- crabs_tune %>% 
+  mutate(min_n = factor(min_n)) %>%
+  filter(.metric == "accuracy") %>%
+  mutate(min_n = as.numeric(as.character(min_n)))
+
+
+crabs_tune %>% 
+  ggplot() +
+  # --- plot mean accuracy metrics; against min_n & colour_by the 3 different values of cost_complexity
+  # line
+  geom_line(aes(x = min_n,
+                y = mean, # mean accuracy; for 10-fold cv
+                colour = cost_complexity,
+                group = cost_complexity), 
+            size = 1.5, 
+            alpha = 0.6) +
+  # dot points
+  geom_point(aes(x = min_n,
+                 y = mean,
+                 colour = cost_complexity), 
+             size = 2) +
+  # --- add error bar *uncertainty; since; based on resamples (expected values)
+  geom_errorbar(aes(x = min_n, 
+                    ymin = mean - std_err, 
+                    ymax = mean + std_err))
+```
+
+**The plot above shows the 10-fold cross-validation results for different choices of cost_complexity and min_n (minsplit). The different folds give multiple values, and hence the mean and a confidence interval can be computed for each parameter combination. Regardless of the choice of parameter, the accuracy is fairly similar, especially for smaller values of min_n.**
+
+```{r out.width = "80%"}
+best_tree <- tree_res %>%
+  select_best("accuracy") # finds; tuning param. combination; with best performance values; according to metric
+
+final_wf <- tree_wf %>% 
+  tune::finalize_workflow(best_tree) # extract final hyper params. in single `workflow`
+
+# --- fit final tree
+final_tree <- final_wf %>%
+  parsnip::fit(data = crabs_tr) # %>%
+  # pull_workflow_fit() # return parsnip model fit object
+  
+final_tree %>% 
+  workflows::extract_fit_engine() %>% 
+  rpart.plot::prp(type = 3, # draw separate split labels; for left & right directions
+                  ni = TRUE, # display node indeces 
+                  nn = TRUE, # display node numbers
+                  extra = 2, # display classification rate at node
+                  box.palette = "RdBu") # palette to colour node boxes
+```
+
+c. Fit the classification tree with the recommended minsplit. Compute the test accuracy, using your 20% test set. Explain why the tree is so complicated. Compare with the accuracy from an LDA. Is this consistent with what you thought would be the best model?
+
+```{r}
+# use fitted model (using training set); to predict test set
+crabs_ts_pred <- crabs_ts %>%
+  mutate(.pred = stats::predict(object = final_tree, crabs_ts)$.pred_class)
+
+crabs_ts_pred %>% 
+  yardstick::conf_mat(truth = class, 
+                      estimate = .pred) 
+
+crabs_ts_pred %>% 
+  yardstick::metrics(truth = class, 
+                     estimate = .pred)
+```
+```{r}
+# --- specify LDA model
+lda_mod <- parsnip::discrim_linear() %>% # (I) specify model
+  parsnip::set_engine("MASS") %>% # (II) set engine
+  parsnip::set_mode("classification") # (III) set mode
+
+lda_mod %>% 
+  translate() 
+
+# --- fit LDA model to training set
+crabs_lda_fit <- lda_mod %>% 
+  fit(class ~ ., 
+      data = crabs_tr)
+```
+
+```{r}
+# use fitted lda model (using training set); make prediction on test set
+crabs_lda_pred <- crabs_ts %>%
+  mutate(.pred = predict(object = crabs_lda_fit, crabs_ts)$.pred_class)
+```
+
+```{r}
+# --- confusion table(matrix)
+crabs_lda_pred %>% 
+  yardstick::conf_mat(truth = class, 
+                      estimate = .pred)
+
+# estimate (common) model accuracy statistics
+crabs_lda_pred %>% 
+  yardstick::metrics(truth = class, 
+                     estimate = .pred)
+```
+
+**The LDA model outperforms the tree model substantially.**
+
+##### © Copyright 2021 Monash University
