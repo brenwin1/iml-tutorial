@@ -1,0 +1,278 @@
+---
+title: "ETC3250/5250 Tutorial 8 Solution"
+subtitle: "Neural networks"
+author: "prepared by Professor Di Cook"
+date: "Week 8"
+output:
+  html_document:
+    after_body: tutorial-footer.html
+    css: tutorial.css
+---
+
+```{r setup, echo=FALSE, message=FALSE, warning=FALSE, warning=FALSE}
+knitr::opts_chunk$set(
+  message = FALSE,
+  warning = FALSE,
+  error = FALSE, 
+  eval = TRUE,
+  collapse = TRUE,
+  comment = "#",
+  fig.height = 4,
+  fig.width = 8,
+  fig.align = "center",
+  cache = FALSE
+)
+
+# --- load libraries
+library(emo)
+library(tidyverse); ggplot2::theme_set(theme_bw())
+library(nnet)
+library(rsample)
+library(yardstick)
+```
+
+
+## `r emo::ji("gear")` Exercises 
+
+This exercise is investigating neural network model fitting. A neural network model was fitted to the `wiggle.csv` using the `nnet` package in R, from many random starts, and using 2-4 nodes in the hidden layer. The best model is in the data object `nnet_best.rda`, and the full set of model fits are stored in `nnet_many.rda`. We are going investigate the best fit, and the complete set of fits. The data set is actually a test set, it was not used to fit the model, but it was simulated from the same process as the training set, which we don't have.
+
+### 1. 
+
+Read in the data, and make an appropriate plot, that communicates the relationship between the two variables and the two groups.
+
+      read in test data
+```{r}
+w <- read_csv(here::here("data/wiggly.csv"))
+```
+
+      plot test data
+•`y` against `x` *note: both predictors (can see them as `x1` & `x2`)
+```{r}
+# plot data
+w %>% 
+  ggplot(aes(x = x,
+             y = y,
+             colour = class,
+             shape = class)) + 
+  geom_point() +
+  ggplot2::scale_color_brewer("",
+                              palette="Dark2") +
+  scale_shape("") +
+  theme(aspect.ratio = 1) 
+```
+
+### 2. 
+
+Read in the best model. Take a look at the object. There are three components: `hidden`, `output` and `nnet`. The best model uses $s=4$. The `nnet` component has the estimated model coefficients, fitted values and residuals. The `hidden` component has information related to the models used in the 4 nodes of the hidden layer, and the `output` has the same information for the second layer. These latter two contain a grid of values for the predictors, $x$, $y$ and the predicted values for each grid point. 
+
+      read in best nn model fitted
+```{r}
+# --- read in best model (`list` object)
+load(here::here("data/nnet_best.rda"))
+```
+      
+
+#### a. 
+•plot the grid of predicted values for the output layer, using node 1 & 2
+•overlay test data
+•how well has the model captured the class structure?
+
+      for output node 1 (predition surface for class A)
+```{r}
+best$output %>%
+  filter(node == 1) %>% # prediction surface for class A
+  ggplot() +
+  # x & y; create grid
+  geom_raster(aes(x = x,
+                  y = y,
+                  # fill by predicted values *create boundary
+                  fill = pred)) +
+  # overlay test data
+  geom_point(aes(x = x,
+                 y = y,
+                 shape = class), 
+             data = w) +
+  scale_fill_gradient2(low = "#1B9E77",
+                       high = "#D95F02",
+                       mid = "white", 
+                       midpoint = 0.5) +
+  theme(aspect.ratio = 1) 
+```
+
+
+      for output node 2 (prediction surface for class B) *just flip side of A
+```{r}
+best$output %>% 
+  filter(node == 2) %>% # prediction surface for class B
+  ggplot() +
+  # x & y; create grid
+  geom_raster(aes(x = x,
+                  y = y,
+                  # fill by predicted values *create boundary
+                  fill = pred)) +
+  # overlay test data
+  geom_point(aes(x = x,
+                 y = y,
+                 shape = class), 
+             data = w) +
+  scale_fill_gradient2(low = "#1B9E77",
+                       high = "#D95F02",
+                       mid = "white", 
+                       midpoint = 0.5) +
+  theme(aspect.ratio = 1) 
+```
+
+**The model does amazingly well to predict this data.**
+
+#### b. 
+Plot the grid of predicted values for each node in the hidden layer, with the data overlaid. Explain how the models at each node would combine to make the final model predictions, which we have already seen are extremely good.
+
+      as per lecture: plot fit of each node in hidden layer
+```{r}
+best$hidden %>% 
+  ggplot() +
+  # x & y; create grid 
+  geom_raster(aes(x = x,
+                  y = y,
+                  # fill by predicted values *create boundary
+                  fill = pred)) + 
+  # # overlay test data pts.
+  # geom_point(aes(x = x,
+  #                y = y,
+  #                shape = class), 
+  #            data = w) +
+  scale_fill_gradient2(low = "#1B9E77",
+                       high = "#D95F02",
+                       mid = "white", 
+                       midpoint = 0.5) +
+  facet_grid(. ~ node) +
+  theme(aspect.ratio = 1)
+```
+
+**We can see that each captures one linear aspect, of the nonlinear boundary.**
+
+#### c. 
+How many parameters are there in this model? Check that your answer matches the number of values in the `wgts` element of the `nnet` component.
+
+```{r}
+best$nnet # description of nn
+
+# extract weights & biases
+best$nnet$wts %>%
+  length() # check length
+```
+
+**p=2, s=4, so there are 3x4=12. s=4 and there are two levels of output, so 5x2=10. There are 22 parameters.**
+
+
+#### d. 
+
+Write down the equation corresponding to the model at first node of the hidden layer. You need to look at the `wgts` element of the `nnet` component. There are 6 sets of linear model coefficients. 
+
+
+```{r}
+# summary table; summarise weights correspond to which node
+summary(best$nnet)
+
+# correspond to:
+best$nnet$wts
+```
+
+
+**The coefficients are:**
+
+```{r}
+best$nnet$wts[1:3]
+```
+
+#### e. 
+
+ADVANCED: See if you can compute the combination of the prediction on each hidden node, to get final prediction.
+
+### 3. 
+
+Read in the complete set of models fitted. There were 600 models fitted, 200 random starts for each $s = 2, 3, 4$. The `nnet` function has its own measure of the goodness of fit, which is used to determine when to stop minimising RSS, which is called `value` in this data. (You can think of this like it is training error.) Plot the predictive accuracy against function's returned value of model fit. Explain how the change in $s$ affects the predictive accuracy. 
+
+      read in `nnet_many.rda` data
+```{r}
+# --- read in results from all nn models fitted (`df`)
+load(here::here("data/nnet_many.rda")) # all nn models fitted
+  
+# convert `df` to `tibble`
+many <- many %>% 
+  as_tibble()
+
+# --- distinct; to extract 600 model outputs
+qual <- many %>%
+  dplyr::select(value, accuracy, nodes, id) %>%
+  distinct()
+```
+
+      plot `fitting criterion` (think training error) against `predictive accuracy`; facet by `s` (no. of hidden units)
+•fitting criterion; can be seen as something like entropy (for categorical variables) or RSS (for nuemric variables)
+```{r}
+qual %>% 
+  ggplot(aes(x = accuracy,
+             y = value)) + 
+  geom_point() + 
+  labs(x = "predictive accuracy",
+       y = "value of fitting criterion") +
+  facet_wrap(. ~ nodes)
+```
+
+**The best performance is achieved by the s=4 node models. The predictive accuracy matches fairly closely the fitting criteria. The biggest feature to note, though, is that there is a lot of variability across models. A different random start can generate a very poor model. It takes some work to find the bext model. But it can be a very good model.**
+
+### 4.
+
+Your turn, use the `nnet` function to fit the wiggly data yourself. Split the wiggly data into training and test sets.
+
+Set a seed, and choose $s=4$. Record the RSS (`value`), and the accuracy for the test set.
+
+Where does your fit lie in terms of all the models Hadley fitted to the data? 
+
+Run it again (without re-setting the seed). Is it a different model?
+
+      split data into 2/3 training & 1/3 test
+```{r}
+set.seed(2022) # set seed for reproducibility
+
+w <- w %>% 
+  mutate(class = factor(class)) # coerce `y` into factor
+
+# --- split data into 2/3 training & 1/3 test set
+split <- rsample::initial_split(data = w,
+                                prop = 2/3) # 2/3 training 
+
+# extract training & test set
+w_tr <- rsample::training(split)
+w_ts <- rsample::testing(split)
+```
+
+      fit neural network on training set; using `nnet::nnet` *as was done above
+- use default arguments
+- note: by default; use logistic activation function
+```{r}
+# --- specify neural network
+m1 <- nnet::nnet(formula = class ~ .,
+                 data = w_tr, 
+                 size = 4, # s = 4 (number of units in hidden layer)
+                 decay = 5e-4, # parameter for weight decay *regularisation for deep learning
+                 maxit = 500) # maximum no. of iterations
+```
+
+      use fitted neural network; make predictions on test set + generate confusion matrix
+```{r}
+w_ts <- w_ts %>% 
+  mutate(cl_p1_num = predict(m1, w_ts)) %>% # extract predicted probability (on probability scale)
+  # if p < 0.5; class A// p > 0.5; class B
+  mutate(cl_p1 = factor(ifelse(test = cl_p1_num < 0.5, 
+                               yes = "A",
+                               no = "B")))
+
+yardstick::conf_mat(data = w_ts, 
+                    truth = class, 
+                    estimate = cl_p1)
+```
+**What you can see is that there is a big different in the model fitting, as indicated by RSS, from one fit to another.**
+
+##### © Copyright 2022 Monash University
