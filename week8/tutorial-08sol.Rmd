@@ -136,11 +136,11 @@ best$hidden %>%
                   y = y,
                   # fill by predicted values *create boundary
                   fill = pred)) + 
-  # # overlay test data pts.
-  # geom_point(aes(x = x,
-  #                y = y,
-  #                shape = class), 
-  #            data = w) +
+  # overlay test data pts.
+  geom_point(aes(x = x,
+                 y = y,
+                 shape = class),
+             data = w) +
   scale_fill_gradient2(low = "#1B9E77",
                        high = "#D95F02",
                        mid = "white", 
